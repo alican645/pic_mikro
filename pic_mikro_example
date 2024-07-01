@@ -1,0 +1,220 @@
+#include <16f877.h>
+#device ADC=10
+#include <stdlib.h>
+#include <stdarg.h> 
+#fuses XT,NOWDT,NOPROTECT,NOBROWNOUT,NOLVP,NOPUT,NOWRT,NODEBUG,NOCPD
+
+#use delay (clock=4000000)
+
+#use fast_io(a)
+#use fast_io(b)
+#use fast_io(c)
+#use fast_io(d) 
+#use fast_io(e)
+
+#define use_portb_lcd TRUE
+
+#define IN1 pin_d0
+#define IN2 pin_d1
+#define ENA pin_d2
+#define ENB pin_d3
+
+#define baslat pin_e0
+#define durdur pin_e1
+
+#include <lcd.c>
+
+#use rs232 (baud=9600, xmit=pin_C6, rcv=pin_C7, parity=N, stop=1)
+
+
+char klavye[80];
+long int olculen_hiz_int;
+unsigned long int bilgi;
+float olculen_hiz;
+
+
+
+unsigned int32 f = 0;   
+unsigned int16 count1=0;
+volatile int8 i=0;
+
+void stop(){
+         output_low(IN1);
+         output_low(IN2);
+         output_low(ENA);
+         output_low(ENB);
+}
+void ileri(){
+         output_high(IN1);
+         output_low(IN2);
+         output_high(ENA);
+         output_high(ENB);
+}
+void geri(){
+         output_low(IN1);
+         output_high(IN2);
+         output_high(ENA);
+         output_high(ENB); 
+}
+void bir_saniye_hesabi()
+{
+   enable_interrupts(GLOBAL);      
+   set_timer1(40536);//65536-40536=25.000*1/125000=0.2sn 
+   set_timer0(0);
+   while(i<5);
+   i=0;
+   disable_interrupts(GLOBAL);
+}
+
+void calculate_frequency(){
+   f = 0;
+   count1 = 0;
+   clear_interrupt(INT_TIMER0);
+   clear_interrupt(INT_TIMER1);  
+   bir_saniye_hesabi();    
+   f= get_timer0();      
+   f =f+count1 * 256;
+    //printf(lcd_putc,"\fFREKANS %luHz",f);
+    lcd_gotoxy(21, 1);
+    printf(lcd_putc,"FREKANS %luHz",f);
+}
+
+#INT_TIMER0
+void  Timer0_kesme() 
+{
+   count1++;
+}
+#INT_TIMER1
+void  Timer1_kesme() 
+{ 
+   set_timer1(40536);
+  i=i+1;
+}
+
+#INT_AD
+void ADC_Kesmesi() {
+   output_high(pin_c5);
+   delay_ms(200);
+   output_low(pin_c5);
+}
+
+#int_rda
+void serihaberlesme_kesmesi() {
+   disable_interrupts(GLOBAL);
+   output_high(pin_c5);
+   gets(klavye);
+
+   char *endptr;
+   long int value = strtol(klavye, &endptr, 10);
+
+   if (*endptr != '\0') {
+
+      printf("\n !!!!!!!!!!!!!!!!!!!GIRDIGINIZ DEGER GECERSIZ!!!!!!!!!!!!!!!!!!!!\n");
+      printf("\n\r !!!!!!!!!!!!!!!!!!!!LUTFEN TEKRAR DENEYINIZ!!!!!!!!!!!!!!!!!!!!!\n");
+      printf(lcd_putc,"\f   GECERSIZ GIRIS  \n  TEKRAR DENEYINIZ  ");
+      delay_ms(1500);
+      printf(lcd_putc,"\f    0-1500 ARASI    \n");
+      printf(lcd_putc," BIR DEGER GIRINIZ! ");
+   } 
+   else if (value < 0 || value > 1500) {
+      printf("\n !!!!!!!!!!!!!!!!!!!GIRDIGINIZ DEGER GECERSIZ!!!!!!!!!!!!!!!!!!!!\n");
+      printf("\n\r !!!!!!!!!!!!!!!!!!!!LUTFEN TEKRAR DENEYINIZ!!!!!!!!!!!!!!!!!!!!!\n");
+      printf(lcd_putc,"\f   GECERSIZ GIRIS  \n  TEKRAR DENEYINIZ  ");
+      delay_ms(1500);
+      printf(lcd_putc,"\f    0-1500 ARASI    \n");
+      printf(lcd_putc," BIR DEGER GIRINIZ! ");
+   } 
+   else if(value<olculen_hiz_int){
+      printf(" >>GIRDIGINIZ DEGER: %ld \n", value);
+      printf(lcd_putc,"\fGIRILEN HIZ:%ld d/d", value);
+      printf(lcd_putc, "\nOLCULEN HIZ:%ld d/d", olculen_hiz_int);
+      lcd_gotoxy(21, 2);
+      printf(lcd_putc, "MOTOR GERI DONUYOR ");
+      if (input(durdur)) {stop();}
+      geri();  
+      for(int tekrar=0;tekrar<5;tekrar++){calculate_frequency();}                 
+   } 
+   else if(value>olculen_hiz_int){
+         printf(" >>GIRDIGINIZ DEGER: %ld \n", value);
+         printf(lcd_putc,"\fGIRILEN HIZ:%ld d/d", value);
+         printf(lcd_putc, "\nOLCULEN HIZ:%ld d/d", olculen_hiz_int);
+         lcd_gotoxy(21, 2);
+         printf(lcd_putc, "MOTOR ILERI DONUYOR");
+         if (input(durdur)) {stop();}
+         ileri();
+         for(int tekrar=0;tekrar<5;tekrar++){calculate_frequency();}                     
+   } 
+   else if(value==olculen_hiz_int){
+   printf(" >>GIRDIGINIZ DEGER : %ld \n", value);
+         printf(lcd_putc,"\fGIRILEN HIZ:%ld d/d", value);
+         printf(lcd_putc, "\nOLCULEN HIZ:%ld d/d", olculen_hiz_int);
+         lcd_gotoxy(21, 2);
+         printf(lcd_putc, "MOTOR DURUYOR");
+         if (input(durdur)) {stop();}
+         stop();
+         for(int tekrar=0;tekrar<5;tekrar++){calculate_frequency();}
+   }
+   output_low(pin_c5);
+   printf("\r\r >>LUTFEN 0-1500 ARASI BIR DEGER GIRINIZ VE ENTER TUSUNA BASINIZ: ");
+   enable_interrupts(GLOBAL);
+}
+
+void main() {
+   setup_psp(PSP_DISABLED); // PSP'yi devre dışı bırak
+   setup_timer_2(T2_DISABLED,0,1);
+   setup_ccp1(CCP_CAPTURE_RE); // CCP1 kesmesi her 4 yükselen kenarda 1 yakalama yapacak
+   setup_CCP2(CCP_OFF);
+   
+   setup_timer_1(T1_INTERNAL | T1_DIV_BY_8 );
+   setup_timer_0(T0_EXT_H_TO_L | RTCC_DIV_1);
+   
+   setup_adc(adc_clock_div_32);
+   setup_adc_ports(AN0);
+  
+   set_tris_d(0x00); // D portunu çıkış olarak ayarla
+   output_d(0x00);  // D portundaki tüm pinleri sıfırla
+
+   output_low(pin_c5);
+   lcd_init();
+   output_d(0x00);
+   printf(lcd_putc,"\f   ALI CAN AYDIN  \n");
+   printf(lcd_putc,"    21180202049    \n");
+   delay_ms(2000);
+   printf(lcd_putc,"\f   LUTFEN BASLAT\n");
+   printf(lcd_putc,"  BUTONUNA BASINIZ   ");
+
+   while (!input(baslat));
+
+   printf(lcd_putc,"\f UYGULAMA  BASLIYOR \n");
+   delay_ms(1000);
+   printf(lcd_putc,"\f");
+   
+   printf("\n\r                ********************************** ");
+   printf("\n\r                MIKRO ISLEMCILER DERSI DONEM ODEVI ");
+   printf("\n\r                ********************************** ");
+   printf("\n\r\r >>LUTFEN 0-1500 ARASI BIR DEGER GIRINIZ VE ENTER TUSUNA BASINIZ: ");
+
+   printf(lcd_putc,"\fLUTFEN KLAVYEDEN\r\n");
+   printf(lcd_putc,"DEGER GIRINIZ");
+   
+   enable_interrupts(INT_AD);
+   
+   enable_interrupts(INT_TIMER0); 
+   enable_interrupts(INT_TIMER1);
+   
+   enable_interrupts(GLOBAL);
+
+   while (1) {
+      enable_interrupts(int_rda);
+      set_adc_channel(0);
+      if (input(durdur)) {stop();}
+      delay_us(20);
+      bilgi = read_adc();
+      if (input(durdur)) {stop();}
+      olculen_hiz = (1.467710371819961 * bilgi);
+      olculen_hiz_int = (long int) olculen_hiz;     
+      if (input(durdur)) {stop();}
+   }
+}
+ 
+
